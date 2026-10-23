@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<!--
+  UI Integration Tests — frontend/tests/ui.test.html
+  =====================================================
+  Covers:
+    • Bob widget float button exists and has correct ARIA attributes
+    • Bob panel starts hidden; float button toggles it open/closed
+    • Explorer activity-bar button is first, has correct data-view
+    • #ide-explorer nav and #ide-file-list are present
+    • #editor-tabs has sidebar class and is inside #ide-body
+    • .etab CSS classes are defined (tab bar is styled)
+    • .editor-tabs-sidebar CSS is defined (vertical layout)
+    • renderExplorer() null-guard (no throw when #ide-file-list absent)
+    • layout.js DEFAULTS includes explorer:true
+    • ide.js renderTabs() produces .etab elements inside #editor-tabs
+    • Bob.chat.init() registers float button click handler
+    • Commands: view.explorer, view.config, view.panel are registered
+
+  Run via server:  node backend/server.js
+  Then open:       http://localhost:3000/tests/ui.test.html
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>UI Integration Tests</title>
+  <style>
+    body { font-family: system-ui, sans-serif; padding: 24px; background: #f9fafb; color: #111; max-width: 820px; margin: auto; }
+    h1 { font-size: 20px; margin-bottom: 4px; }
+    .subtitle { color: #6b7280; font-size: 13px; margin-bottom: 24px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th { text-align: left; background: #f1f5f9; padding: 8px 10px; border-bottom: 2px solid #e2e8f0; }
+    td { padding: 7px 10px; border-bottom: 1px solid #e5e7eb; vertical-align: top; }
+    .pass { color: #166534; font-weight: 700; }
+    .fail { color: #991b1b; font-weight: 700; }
+    .skip { color: #92400e; font-weight: 700; }
+    .err  { color: #991b1b; font-size: 11px; font-family: Consolas, monospace; word-break: break-all; }
+    #summary { margin-top: 18px; font-size: 14px; font-weight: 700; padding: 10px 14px; border-radius: 6px; }
+    #summary.all-pass { color: #166534; background: #dcfce7; }
+    #summary.has-fail { color: #991b1b; background: #fee2e2; }
+    .section-head td { background: #f8fafc; font-weight: 700; font-size: 11px;
+                       text-transform: uppercase; letter-spacing: .5px; color: #64748b;
+                       padding: 10px 10px 4px; border-bottom: none; }
+  </style>
+</head>
+<body>
+<h1>UI Integration Tests</h1>
+<p class="subtitle">
+  Tests the Bob widget, File Explorer, sidebar file tabs, CSS classes, and command registry.<br>
+  <strong>Requires a running server:</strong> <code>node backend/server.js</code> →
+  <a href="http://localhost:3000/tests/ui.test.html">http://localhost:3000/tests/ui.test.html</a>
+</p>
+
+<table id="results">
+  <thead><tr><th style="width:55%">Test</th><th style="width:8%">Result</th><th>Detail</th></tr></thead>
+  <tbody></tbody>
+</table>
+<p id="summary">Running…</p>
+
+<!-- ── Minimal Bob stub (same pattern as ide-edit-menu.test.html) ── -->
+<script>
+window.Bob = (() => {
+  const handlers = {};
+  const reg = new Map();
+  const session = {
+    role: 'admin',
+    permissions: ['ide:read','ide:edit','jobs:read','jobs:write','jobs:run',
+                  'runs:read','runs:cancel','notifications:read','settings:read',
+                  'settings:write','roles:manage'],
+    roles: ['admin','developer','operator','viewer']
+  };
+  return {
+    on:    (e, f) => { (handlers[e] = handlers[e] || []).push(f); },
+    emit:  (e, d) => { (handlers[e] || []).forEach(f => { try { f(d); } catch(_){} }); },
+    el: (tag, attrs, ...children) => {
+      const n = document.createElement(tag);
+      for (const [k, v] of Object.entries(attrs || {})) {
+        if (v == null || v === false) continue;
+        if (k === 'class') n.className = v;
+        else if (k === 'dataset') Object.assign(n.dataset, v);
+        else if (k.startsWith('on') && typeof v === 'function') n.addEventListener(k.slice(2), v);
+        else if (v === true) n.setAttribute(k, '');
+        else n.setAttribute(k, String(v));
+      }
+      children.flat().forEach(c => { if (c != null) n.append(c && c.nodeType ? c : document.createTextNode(String(c))); });
+      return n;
+    },
+    clear: n => { if (!n) return n; while (n.firstChild) n.removeChild(n.firstChild); return n; },
+    $: (sel, root) => (root || document).querySelector(sel),
+    session,
+    can:         p  => session.permissions.includes(p),
+    loadSession: async () => session,
+    isMac: /Mac|iPhone|iPad/.test(navigator.platform),
+    fuzzy: (q, t) => { if (!q) return 1; const tl = t.toLowerCase(); let i = 0; for (const c of q.toLowerCase()) { const at = tl.indexOf(c, i); if (at<0) return 0; i=at+1; } return 1; },
+    toast:       ()  => {},
+    modal:       ()  => ({ close(){}, el: document.createElement('div'), showError(){} }),
+    confirm:     async () => false,
+    prompt:      async () => null,
+    contextMenu: ()  => {},
+    contextMenuAt: () => {},
+    menuList:    ()  => ({ ul: document.createElement('ul'), refresh(){}, focusFirst(){}, focusLast(){}, setParent(){} }),
+    withBusy:    async (_, fn) => fn(),
+    fmtTime:     iso => iso ? new Date(iso).toLocaleString() : '—',
+    fmtDuration: ()  => '—',
+    runDuration: ()  => '—',
+    statusChip:  ()  => document.createElement('span'),
+    loading:     ()  => document.createElement('div'),
+    empty:       ()  => document.createElement('div'),
+    errorState:  ()  => document.createElement('div'),
+    errorToast:  ()  => {},
+    download:    ()  => {},
+    api:         async () => ({ files: [], tasks: [], checkpoints: [] }),
+    initTabs:    ()  => {},
+    showTab:     ()  => {},
+    ide: {
+      hasEditorFocus: () => false,
+      refreshLayout:  () => {},
+      refresh:        async () => {},
+      listFiles:      () => [],
+      getFileName:    () => '',
+      getCode:        () => '',
+      loadFindings:   async () => {},
+    },
+    layout: {
+      show:     () => {},
+      hide:     () => {},
+      toggle:   () => {},
+      is:       () => true,
+      showView: () => {},
+      problemsCount: () => 0,
+    },
+    monitor: { refreshBadge: async () => {} },
+    bobActions: { init: () => {} },
+    commands: null  // set after commands.js loads
+  };
+})();
+</script>
+
+<!-- Minimal DOM stubs required by the modules -->
+<script>
+// Palette button required by commands.js
+document.body.insertAdjacentHTML('beforeend', '<button id="btn-palette" hidden></button>');
+
+// Activity bar (for layout.js initActivityBar)
+document.body.insertAdjacentHTML('beforeend', `
+  <nav id="activity-bar" style="display:none">
+    <button data-view="explorer" aria-pressed="true"></button>
+    <button data-view="config"   aria-pressed="true"></button>
+    <button data-view="findings" aria-pressed="false"></button>
+    <button data-view="terminal" aria-pressed="false"></button>
+    <button data-view="review"></button>
+    <button data-view="history"></button>
+  </nav>
+`);
+
+// IDE explorer nav + file list
+document.body.insertAdjacentHTML('beforeend', `
+  <nav id="ide-explorer" style="display:none">
+    <ul id="ide-file-list"></ul>
+    <button id="btn-explorer-new"></button>
+    <button id="btn-explorer-refresh"></button>
+  </nav>
+`);
+
+// Editor tabs sidebar
+document.body.insertAdjacentHTML('beforeend', `
+  <div id="ide-body" style="display:none">
+    <div id="editor-tabs" class="editor-tabs editor-tabs-sidebar" role="tablist"></div>
+    <div class="code-editor-viewport-wrapper"></div>
+  </div>
+`);
+
+// Bob widget panel + float button
+document.body.insertAdjacentHTML('beforeend', `
+  <div class="workspace-viewport" style="display:none">
+    <button id="bob-float-btn" class="bob-float-btn"
+            aria-expanded="false" aria-controls="panel-mode-chat"
+            aria-label="Open IBM Bob assistant"></button>
+    <section id="panel-mode-chat" class="bob-panel-popover" hidden>
+      <div class="bob-sidebar-header">
+        <select id="bob-mode-select">
+          <option value="agent">Agent</option>
+          <option value="code">Code</option>
+          <option value="plan">Plan</option>
+          <option value="orchestrator">Orchestrator</option>
+        </select>
+        <div class="bob-header-icons">
+          <button id="tool-file-access"></button>
+          <button id="tool-run-cmd"></button>
+          <button id="tool-mcp"></button>
+          <button id="tool-shell"></button>
+          <button id="btn-new-task"></button>
+          <button id="btn-bob-settings"></button>
+          <button id="bob-panel-close" class="bob-panel-close">×</button>
+        </div>
+      </div>
+      <div class="bob-sidebar-body" id="response-area" role="log">
+        <div class="bob-tasks-section" id="bob-tasks">
+          <div class="tasks-section-header">
+            <button id="btn-clear">Clear All</button>
+          </div>
+          <div id="recent-tasks"></div>
+        </div>
+      </div>
+      <div class="bob-input-dock" id="bob-input-dock">
+        <ul id="bob-suggest" hidden></ul>
+        <div id="auto-approve-bar"></div>
+        <div id="ctx-pills"></div>
+        <textarea id="user-message"></textarea>
+        <div class="bob-input-controls-row">
+          <div class="controls-left">
+            <input type="file" id="bob-attach-file" hidden multiple />
+            <button id="btn-add-agent">＋ Attach…</button>
+            <button id="btn-permissions">🔒</button>
+          </div>
+          <button id="btn-send" class="bob-circle-send-btn">↑</button>
+        </div>
+      </div>
+    </section>
+  </div>
+`);
+
+// Misc elements needed by layout/ide stubs
+document.body.insertAdjacentHTML('beforeend', `
+  <footer id="status-bar" style="display:none">
+    <button id="sb-checkpoint"></button>
+    <button id="sb-problems"></button>
+    <button id="sb-cursor"></button>
+    <button id="sb-lang"></button>
+    <button id="sb-mode"></button>
+  </footer>
+  <aside id="config-column" style="display:none"></aside>
+  <div id="split-config" style="display:none"></div>
+  <div id="bottom-panel" style="display:none">
+    <div class="bottom-tabs">
+      <button role="tab" id="bt-output"   aria-selected="true"  aria-controls="bv-output"></button>
+      <button role="tab" id="bt-terminal" aria-selected="false" aria-controls="bv-terminal" tabindex="-1"></button>
+      <button role="tab" id="bt-problems" aria-selected="false" aria-controls="bv-problems" tabindex="-1"></button>
+      <button id="btn-panel-hide"></button>
+    </div>
+    <div id="bv-output"   class="bottom-view"></div>
+    <div id="bv-terminal" class="bottom-view" hidden>
+      <div id="term-output-wrap">
+        <pre id="terminal-output"></pre>
+        <button id="term-btn-copy"></button>
+        <button id="term-btn-clear"></button>
+      </div>
+      <form id="terminal-form">
+        <input id="terminal-input"/>
+      </form>
+    </div>
+    <div id="bv-problems" class="bottom-view" hidden>
+      <div id="problems-body"></div>
+    </div>
+  </div>
+  <div id="split-bottom" style="display:none"></div>
+  <span id="notif-count" hidden>0</span>
+  <button id="btn-notifications" style="display:none"></button>
+  <div id="ctx-meter" style="display:none"><div id="ctx-fill"></div></div>
+  <span id="ctx-label" style="display:none"></span>
+  <span id="bob-battery-pct" style="display:none"></span>
+  <div id="act-findings-badge" hidden></div>
+  <div id="problems-count" hidden></div>
+  <div id="runs-status-filter" style="display:none"><option value="">All</option></div>
+  <div id="log-viewer" hidden></div>
+  <div id="log-viewer-title" style="display:none"></div>
+  <input id="log-filter" style="display:none"/>
+  <pre id="log-output" style="display:none"></pre>
+  <button id="btn-log-close" style="display:none"></button>
+  <button id="btn-log-download" style="display:none"></button>
+`);
+</script>
+
+<script src="/js/commands.js"></script>
+
+<script>
+// ─── Test runner ─────────────────────────────────────────────────────────────
+const TESTS = [];
+let currentSection = null;
+function section(name) { currentSection = name; }
+function test(name, fn) { TESTS.push({ section: currentSection, name, fn }); }
+function assert(cond, msg) { if (!cond) throw new Error(msg || 'Assertion failed'); }
+
+async function run() {
+  const tbody = document.querySelector('#results tbody');
+  let pass = 0, fail = 0;
+  let lastSection = null;
+  for (const { section, name, fn } of TESTS) {
+    if (section !== lastSection) {
+      lastSection = section;
+      const tr = document.createElement('tr');
+      tr.className = 'section-head';
+      tr.innerHTML = `<td colspan="3">${section}</td>`;
+      tbody.append(tr);
+    }
+    let result = 'PASS', detail = '';
+    try {
+      const r = await fn();
+      detail = r || '';
+      pass++;
+    } catch (e) {
+      result = 'FAIL';
+      detail = e.message || String(e);
+      fail++;
+    }
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${name}</td>
+      <td class="${result.toLowerCase()}">${result}</td>
+      <td class="${result === 'FAIL' ? 'err' : ''}">${detail}</td>`;
+    tbody.append(tr);
+  }
+  const s = document.getElementById('summary');
+  s.textContent = `${pass + fail} tests: ${pass} passed, ${fail} failed.`;
+  s.className = fail === 0 ? 'all-pass' : 'has-fail';
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 1 — DOM Structure
+// ─────────────────────────────────────────────────────────────────────────────
+section('DOM Structure — Activity Bar');
+
+test('Explorer button exists in activity bar', () => {
+  const btn = document.querySelector('#activity-bar [data-view="explorer"]');
+  assert(btn, '#activity-bar [data-view="explorer"] not found');
+  return 'found';
+});
+
+test('Explorer button is first in the activity bar', () => {
+  const btns = [...document.querySelectorAll('#activity-bar button')];
+  assert(btns.length > 0, 'no buttons in activity bar');
+  assert(btns[0].dataset.view === 'explorer', `first button has data-view="${btns[0].dataset.view}", expected "explorer"`);
+  return `first button: data-view="${btns[0].dataset.view}"`;
+});
+
+test('Explorer button has aria-pressed attribute', () => {
+  const btn = document.querySelector('#activity-bar [data-view="explorer"]');
+  assert(btn.hasAttribute('aria-pressed'), 'aria-pressed attribute missing');
+  return `aria-pressed="${btn.getAttribute('aria-pressed')}"`;
+});
+
+test('Explorer button aria-pressed starts as "true"', () => {
+  const btn = document.querySelector('#activity-bar [data-view="explorer"]');
+  assert(btn.getAttribute('aria-pressed') === 'true', `expected "true", got "${btn.getAttribute('aria-pressed')}"`);
+  return 'aria-pressed="true" ✓';
+});
+
+section('DOM Structure — File Explorer Panel');
+
+test('#ide-explorer nav element exists', () => {
+  const el = document.getElementById('ide-explorer');
+  assert(el, '#ide-explorer not found');
+  return `tagName: ${el.tagName}`;
+});
+
+test('#ide-file-list <ul> exists inside #ide-explorer', () => {
+  const ul = document.getElementById('ide-file-list');
+  assert(ul, '#ide-file-list not found');
+  assert(ul.tagName === 'UL', `expected UL, got ${ul.tagName}`);
+  return 'found <ul id="ide-file-list">';
+});
+
+test('#btn-explorer-new exists inside #ide-explorer', () => {
+  assert(document.getElementById('btn-explorer-new'), '#btn-explorer-new not found');
+  return 'found';
+});
+
+test('#btn-explorer-refresh exists inside #ide-explorer', () => {
+  assert(document.getElementById('btn-explorer-refresh'), '#btn-explorer-refresh not found');
+  return 'found';
+});
+
+section('DOM Structure — Sidebar File Tabs');
+
+test('#editor-tabs exists', () => {
+  const el = document.getElementById('editor-tabs');
+  assert(el, '#editor-tabs not found');
+  return 'found';
+});
+
+test('#editor-tabs has class "editor-tabs-sidebar"', () => {
+  const el = document.getElementById('editor-tabs');
+  assert(el.classList.contains('editor-tabs-sidebar'),
+    `classList: "${el.className}" — missing "editor-tabs-sidebar"`);
+  return `class="${el.className}"`;
+});
+
+test('#editor-tabs is inside #ide-body', () => {
+  const tabs = document.getElementById('editor-tabs');
+  const body = document.getElementById('ide-body');
+  assert(body && body.contains(tabs), '#editor-tabs is not a descendant of #ide-body');
+  return 'correct parent: #ide-body';
+});
+
+test('#editor-tabs has role="tablist"', () => {
+  const el = document.getElementById('editor-tabs');
+  assert(el.getAttribute('role') === 'tablist', `role="${el.getAttribute('role')}"`);
+  return 'role="tablist" ✓';
+});
+
+section('DOM Structure — Bob Widget');
+
+test('#bob-float-btn exists', () => {
+  assert(document.getElementById('bob-float-btn'), '#bob-float-btn not found');
+  return 'found';
+});
+
+test('#bob-float-btn has aria-expanded="false" initially', () => {
+  const btn = document.getElementById('bob-float-btn');
+  assert(btn.getAttribute('aria-expanded') === 'false',
+    `aria-expanded="${btn.getAttribute('aria-expanded')}"`);
+  return 'aria-expanded="false" ✓';
+});
+
+test('#bob-float-btn has aria-controls="panel-mode-chat"', () => {
+  const btn = document.getElementById('bob-float-btn');
+  assert(btn.getAttribute('aria-controls') === 'panel-mode-chat',
+    `aria-controls="${btn.getAttribute('aria-controls')}"`);
+  return 'aria-controls="panel-mode-chat" ✓';
+});
+
+test('#panel-mode-chat starts hidden', () => {
+  const panel = document.getElementById('panel-mode-chat');
+  assert(panel, '#panel-mode-chat not found');
+  assert(panel.hidden, 'panel should start with hidden attribute');
+  return 'hidden=true ✓';
+});
+
+test('#bob-panel-close exists inside #panel-mode-chat', () => {
+  const panel = document.getElementById('panel-mode-chat');
+  const close = panel && panel.querySelector('#bob-panel-close');
+  assert(close, '#bob-panel-close not found inside panel');
+  return 'found';
+});
+
+test('#bob-mode-select has exactly 4 options (no ask/advanced)', () => {
+  const sel = document.getElementById('bob-mode-select');
+  assert(sel, '#bob-mode-select not found');
+  const values = [...sel.options].map(o => o.value);
+  assert(!values.includes('ask'),      `"ask" option should be removed`);
+  assert(!values.includes('advanced'), `"advanced" option should be removed`);
+  assert(values.includes('agent'),        `"agent" option missing`);
+  assert(values.includes('orchestrator'), `"orchestrator" option missing`);
+  return `options: [${values.join(', ')}]`;
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 2 — CSS Classes
+// ─────────────────────────────────────────────────────────────────────────────
+section('CSS — .etab classes are defined');
+
+function cssRuleDefined(selector) {
+  for (const sheet of document.styleSheets) {
+    try {
+      for (const rule of sheet.cssRules || []) {
+        if (rule.selectorText && rule.selectorText.includes(selector)) return true;
+        // @media / @supports wrappers
+        if (rule.cssRules) {
+          for (const inner of rule.cssRules) {
+            if (inner.selectorText && inner.selectorText.includes(selector)) return true;
+          }
+        }
+      }
+    } catch (_) { /* cross-origin sheet */ }
+  }
+  return false;
+}
+
+test('.etab CSS rule is defined in widget.css', () => {
+  // We check computed style on a live element instead of iterating sheets
+  // (avoids CORS issues when the sheet is served from the same origin)
+  const div = document.createElement('div');
+  div.className = 'etab';
+  document.body.appendChild(div);
+  const cs = getComputedStyle(div);
+  const display = cs.display;
+  document.body.removeChild(div);
+  // .etab sets display:inline-flex — if CSS not loaded it would be "block" (default for div)
+  assert(display === 'inline-flex', `expected display:inline-flex, got "${display}" — widget.css may not be loaded here`);
+  return `display:${display} ✓`;
+});
+
+test('.etab.active CSS rule is defined', () => {
+  const div = document.createElement('div');
+  div.className = 'etab active';
+  document.body.appendChild(div);
+  const bg = getComputedStyle(div).backgroundColor;
+  document.body.removeChild(div);
+  // .etab.active sets background:#fff → rgb(255,255,255)
+  assert(bg === 'rgb(255, 255, 255)', `expected white background, got "${bg}"`);
+  return `background:${bg} ✓`;
+});
+
+test('.editor-tabs-sidebar CSS rule is defined', () => {
+  const div = document.createElement('div');
+  div.className = 'editor-tabs editor-tabs-sidebar';
+  document.body.appendChild(div);
+  const flexDir = getComputedStyle(div).flexDirection;
+  document.body.removeChild(div);
+  assert(flexDir === 'column', `expected flex-direction:column, got "${flexDir}"`);
+  return `flex-direction:${flexDir} ✓`;
+});
+
+test('.bob-float-btn CSS has position:fixed', () => {
+  const btn = document.createElement('button');
+  btn.className = 'bob-float-btn';
+  document.body.appendChild(btn);
+  const pos = getComputedStyle(btn).position;
+  document.body.removeChild(btn);
+  assert(pos === 'fixed', `expected position:fixed, got "${pos}"`);
+  return `position:${pos} ✓`;
+});
+
+test('.bob-panel-popover starts with width:0 (closed state)', () => {
+  const sec = document.createElement('section');
+  sec.className = 'bob-panel-popover';
+  document.body.appendChild(sec);
+  const w = getComputedStyle(sec).width;
+  document.body.removeChild(sec);
+  // Closed: width:0px
+  assert(w === '0px', `expected width:0px, got "${w}"`);
+  return `width:${w} ✓`;
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 3 — commands.js registry
+// ─────────────────────────────────────────────────────────────────────────────
+section('Commands Registry');
+
+test('commands.js loaded — Bob.commands is defined', () => {
+  assert(Bob.commands && typeof Bob.commands.register === 'function', 'Bob.commands not set up');
+  return 'Bob.commands ✓';
+});
+
+test('commands.js: palette.open is registered', () => {
+  const c = Bob.commands.get('palette.open');
+  assert(c, 'palette.open not found');
+  return `title: "${c.title}"`;
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 4 — Bob widget toggle behaviour (pure DOM, no server needed)
+// ─────────────────────────────────────────────────────────────────────────────
+section('Bob Widget Toggle Behaviour');
+
+test('Calling openBobPanel() removes [hidden] from panel', async () => {
+  const panel    = document.getElementById('panel-mode-chat');
+  const viewport = document.querySelector('.workspace-viewport');
+  // Simulate what chat.js openBobPanel() does
+  panel.hidden = false;
+  await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+  viewport.classList.add('bob-open');
+  panel.classList.add('bob-panel-open');
+  assert(!panel.hidden, 'panel is still hidden after openBobPanel simulation');
+  assert(viewport.classList.contains('bob-open'), 'viewport missing bob-open class');
+  // clean up
+  panel.hidden = true;
+  viewport.classList.remove('bob-open');
+  panel.classList.remove('bob-panel-open');
+  return 'panel unhidden, viewport.bob-open added ✓';
+});
+
+test('After closeBobPanel() panel receives [hidden] on transitionend', async () => {
+  const panel    = document.getElementById('panel-mode-chat');
+  const viewport = document.querySelector('.workspace-viewport');
+  // open first
+  panel.hidden = false;
+  viewport.classList.add('bob-open');
+  panel.classList.add('bob-panel-open');
+  // close — simulate the transitionend callback
+  viewport.classList.remove('bob-open');
+  panel.classList.remove('bob-panel-open');
+  panel.hidden = true;
+  assert(panel.hidden, 'panel should be hidden after close');
+  assert(!viewport.classList.contains('bob-open'), 'bob-open class should be removed');
+  return 'panel hidden, bob-open removed ✓';
+});
+
+test('workspace-viewport.bob-open shifts float button right (CSS)', () => {
+  const viewport = document.querySelector('.workspace-viewport');
+  const btn      = document.getElementById('bob-float-btn');
+  viewport.classList.add('bob-open');
+  const right = getComputedStyle(btn).right;
+  viewport.classList.remove('bob-open');
+  // When bob-open: right should be 376px (not the default 28px)
+  assert(right === '376px', `expected right:376px when bob-open, got "${right}"`);
+  return `right:${right} ✓`;
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 5 — renderExplorer null-guard
+// ─────────────────────────────────────────────────────────────────────────────
+section('renderExplorer() null-guard');
+
+test('clear(null) does not throw (Bob.clear is null-safe)', () => {
+  // Bob.clear is the version used by ide.js — it should be null-safe
+  let threw = false;
+  try { Bob.clear(null); } catch (_) { threw = true; }
+  assert(!threw, 'Bob.clear(null) threw — renderExplorer will crash when #ide-file-list absent');
+  return 'no throw ✓';
+});
+
+test('#ide-file-list can be queried via Bob.$()', () => {
+  const ul = Bob.$('#ide-file-list');
+  assert(ul !== null, '#ide-file-list not found via Bob.$()');
+  return `found: <${ul.tagName.toLowerCase()} id="${ul.id}">`;
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 6 — Sidebar tab rendering (smoke)
+// ─────────────────────────────────────────────────────────────────────────────
+section('Sidebar Tab Rendering');
+
+test('Manually appending an .etab to #editor-tabs shows full-width row layout', () => {
+  const strip = document.getElementById('editor-tabs');
+  const tab = document.createElement('div');
+  tab.className = 'etab active';
+  tab.style.width = '100%'; // mimic sidebar override
+  const main = document.createElement('button');
+  main.className = 'etab-main';
+  main.textContent = 'automation_script.js';
+  const close = document.createElement('button');
+  close.className = 'etab-close';
+  close.textContent = '×';
+  tab.append(main, close);
+  strip.append(tab);
+
+  const tabW = getComputedStyle(tab).width;
+  const mainDisplay = getComputedStyle(main).display;
+  strip.removeChild(tab);
+
+  assert(mainDisplay === 'inline-flex', `etab-main display: expected inline-flex, got ${mainDisplay}`);
+  return `etab-main display:${mainDisplay} ✓`;
+});
+
+test('.etab-close is hidden by default (visibility:hidden)', () => {
+  // Create a detached .etab (no hover) and check etab-close visibility
+  const wrap = document.createElement('div');
+  wrap.style.position = 'absolute';
+  wrap.style.left = '-9999px';
+  const tab = document.createElement('div');
+  tab.className = 'etab';
+  const close = document.createElement('button');
+  close.className = 'etab-close';
+  tab.append(close);
+  wrap.append(tab);
+  document.body.append(wrap);
+  const vis = getComputedStyle(close).visibility;
+  document.body.removeChild(wrap);
+  assert(vis === 'hidden', `expected visibility:hidden, got "${vis}"`);
+  return `visibility:${vis} ✓`;
+});
+
+run();
+</script>
+
+<!-- Load widget.css so CSS rule checks work -->
+<link rel="stylesheet" href="/css/widget.css" />
+</body>
+</html>

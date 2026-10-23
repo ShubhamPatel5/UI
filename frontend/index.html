@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>USAA Automation Agent</title>
+  <link rel="icon" href="data:," />
+  <link rel="stylesheet" href="/vendor/codemirror/lib/codemirror.css" />
+  <link rel="stylesheet" href="/vendor/codemirror/theme/neo.css" />
+  <link rel="stylesheet" href="/vendor/codemirror/addon/dialog/dialog.css" />
+  <link rel="stylesheet" href="css/widget.css" />
+</head>
+<body>
+
+  <!-- Skip link for keyboard accessibility -->
+  <a class="skip-link" href="#workspace-main">Skip to workspace</a>
+
+  <!-- USAA Corporate Style Top Navigation Bar -->
+  <header class="usaa-global-nav" data-testid="global-nav">
+    <div class="nav-left-brand">
+      <h2 data-testid="app-title">USAA Automation Agent</h2>
+    </div>
+    <div class="nav-right-controls">
+      <div id="status-badge" data-testid="header-status-badge" class="badge badge-off" role="status" aria-live="polite">● Not Connected</div>
+    </div>
+  </header>
+
+  <!-- Main Viewport Framework -->
+  <div class="workspace-viewport">
+
+    <!-- Activity bar -->
+    <nav class="activity-bar" id="activity-bar" data-testid="activity-bar" aria-label="Activity bar">
+      <button type="button" data-testid="activity-config" data-view="config" data-tip="Agent configuration" aria-label="Agent configuration" aria-pressed="true"><span aria-hidden="true">⚙️</span></button>
+    </nav>
+
+    <!-- LEFT PANEL: Gateway Connection & Agent Configuration -->
+    <aside class="panel-column config-column" id="config-column" data-testid="config-panel" aria-label="Agent configuration">
+      <div class="config-inner-deck">
+        <h3><span aria-hidden="true">⚙️</span> Configuration Settings</h3>
+
+        <!-- 1. Gateway Connection Section -->
+        <div class="gw-connection-card" data-testid="gateway-card">
+          <div class="gw-header-row">
+            <span class="gw-title">Gateway Connection</span>
+            <span id="gw-status-badge" data-testid="gateway-status" class="status-chip status-disconnected">Disconnected</span>
+          </div>
+          <p class="gw-desc">Connect using pre-configured backend environment parameters.</p>
+          <button type="button" id="btn-connect" data-testid="gateway-connect-button" class="btn btn-navy-action">
+            <span class="btn-spinner" id="gw-spinner" hidden aria-hidden="true"></span>
+            <span class="btn-icon" id="gw-btn-icon" aria-hidden="true">🔌</span>
+            <span id="btn-connect-label" data-testid="gateway-connect-label">Connect</span>
+          </button>
+          <div id="gw-error" data-testid="gateway-error" class="inline-error" hidden role="alert"></div>
+        </div>
+
+        <div class="section-title">Agent Configuration</div>
+
+        <!-- 2. Agent Selection -->
+        <div class="form-group">
+          <label for="agent-select">Agent Selection</label>
+          <select id="agent-select" data-testid="agent-select" aria-label="Select agent">
+            <option value="selenium-orchestrator">selenium-orchestrator</option>
+            <option value="selenium-xray-sync">selenium-xray-sync</option>
+            <option value="selenium-planner">selenium-planner</option>
+            <option value="selenium-generator">selenium-generator</option>
+            <option value="selenium-executor">selenium-executor</option>
+            <option value="selenium-reviewer">selenium-reviewer</option>
+            <option value="selenium-defect-healer">selenium-defect-healer</option>
+          </select>
+        </div>
+
+        <!-- 3. Module Name Input (Optional) -->
+        <div class="form-group">
+          <label for="module-name">Module Name <span class="form-hint">(optional)</span></label>
+          <input type="text" id="module-name" data-testid="module-name-input" placeholder="e.g. Inventory, Login (optional)" autocomplete="off" spellcheck="false" />
+        </div>
+
+        <!-- 4. Test Case ID Input (Optional) -->
+        <div class="form-group">
+          <label for="test-case-id">Test Case ID <span class="form-hint">(optional)</span></label>
+          <input type="text" id="test-case-id" data-testid="test-case-id-input" placeholder="e.g. TC_001, TC_LOGIN_01 (optional)" autocomplete="off" spellcheck="false" />
+        </div>
+
+        <!-- 5. Test Case File Upload -->
+        <div class="form-group">
+          <label for="btn-upload-testcase">Upload Test Cases <span class="form-hint">(optional)</span></label>
+          <div class="upload-zone" id="testcase-upload-zone" data-testid="upload-zone" tabindex="0" role="region" aria-label="Upload test cases drag and drop zone">
+            <input type="file" id="file-input-testcase" data-testid="upload-file-input" accept=".json,.csv,.xlsx,.yaml,.yml,.xml" style="display:none;" aria-hidden="true" />
+            <div class="upload-row">
+              <button type="button" id="btn-upload-testcase" data-testid="upload-button" class="btn btn-slate-secondary btn-small" aria-label="Upload test case file">
+                <span class="btn-spinner" id="upload-spinner" hidden aria-hidden="true"></span>
+                <span class="btn-icon" id="upload-btn-icon" aria-hidden="true">📁</span>
+                <span id="btn-upload-testcase-label">Upload Test Cases</span>
+              </button>
+              <span class="upload-filename" id="upload-testcase-filename" data-testid="upload-filename" title="No file selected">No file selected</span>
+              <button type="button" id="btn-clear-upload" data-testid="upload-clear-button" class="btn-small upload-clear" hidden title="Remove uploaded file" aria-label="Remove uploaded test case file">✕</button>
+            </div>
+            <span class="upload-hint">Drag &amp; drop or browse (.csv, .xlsx, .json, .yaml, .xml)</span>
+          </div>
+          <div id="upload-error" data-testid="upload-error" class="inline-error" hidden role="alert"></div>
+        </div>
+
+        <!-- Execute Action Button -->
+        <button type="button" id="btn-run-agent" data-testid="run-agent-button" class="btn btn-primary-action btn-execute">
+          <span class="btn-spinner" id="run-spinner" hidden aria-hidden="true"></span>
+          <span class="btn-icon" id="run-btn-icon" aria-hidden="true">▶</span>
+          <span id="btn-run-agent-label" data-testid="run-agent-label">Run Agent</span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- Draggable / keyboard-resizable splitter between configuration column and workspace -->
+    <div class="splitter splitter-v" id="split-config" role="separator" aria-orientation="vertical" aria-label="Resize configuration panel" aria-controls="config-column" tabindex="0"></div>
+
+    <!-- CENTER PANEL: Workstation with Output, Dashboard, Jobs, Runs tabs -->
+    <main class="interaction-workspace-column" id="workspace-main" tabindex="-1">
+
+      <!-- Accessible main tab strip -->
+      <div class="tab-strip" role="tablist" aria-label="Workspace sections" id="main-tabs" data-testid="main-tabs">
+        <button type="button" data-testid="tab-output" role="tab" id="tab-output" aria-controls="panel-output" aria-selected="true">Output</button>
+        <button type="button" data-testid="tab-dashboard" role="tab" id="tab-dashboard" aria-controls="panel-dashboard" aria-selected="false">Dashboard</button>
+        <button type="button" data-testid="tab-docs" role="tab" id="tab-docs" aria-controls="panel-docs" aria-selected="false">Docs &amp; Reports</button>
+        <button type="button" data-testid="tab-runs" role="tab" id="tab-runs" aria-controls="panel-runs" aria-selected="false">Runs &amp; Logs</button>
+      </div>
+
+      <!-- ═══════════ OUTPUT TAB ═══════════ -->
+      <section id="panel-output" data-testid="panel-output" role="tabpanel" aria-labelledby="tab-output" class="tab-panel scroll-panel">
+        <div class="panel-toolbar">
+          <h3 class="panel-title">Execution &amp; Test Reports</h3>
+          <div class="toolbar-actions">
+            <button type="button" class="btn-small" id="btn-clear-output" data-testid="clear-output-button" aria-label="Clear output reports">Clear Output</button>
+          </div>
+        </div>
+
+        <!-- Output Sub-tab Bar -->
+        <div class="output-subtabs-bar" role="tablist" aria-label="Output report sections" id="output-subtabs">
+          <button type="button" data-testid="subtab-exec-report" role="tab" id="subtab-exec-report" class="output-subtab active" aria-controls="subpanel-exec-report" aria-selected="true">Agent Execution Report</button>
+          <button type="button" data-testid="subtab-test-report" role="tab" id="subtab-test-report" class="output-subtab" aria-controls="subpanel-test-report" aria-selected="false">Test Report</button>
+        </div>
+
+        <!-- Subpanel 1: Agent Execution Report -->
+        <div id="subpanel-exec-report" data-testid="exec-report-panel" role="tabpanel" aria-labelledby="subtab-exec-report" class="output-subpanel" aria-live="polite">
+          <div class="empty-state-box" data-testid="exec-empty-state">
+            <div class="empty-icon" aria-hidden="true">📋</div>
+            <h4>No execution yet</h4>
+            <p>Select an agent, fill in Module Name and Test Case ID, and click <strong>Run Agent</strong> to execute.</p>
+          </div>
+        </div>
+
+        <!-- Subpanel 2: Test Report -->
+        <div id="subpanel-test-report" data-testid="test-report-panel" role="tabpanel" aria-labelledby="subtab-test-report" class="output-subpanel" aria-live="polite" hidden>
+          <div class="empty-state-box" data-testid="test-empty-state">
+            <div class="empty-icon" aria-hidden="true">📊</div>
+            <h4>No test reports available</h4>
+            <p>Run an agent to generate test execution summary and assertion metrics.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══════════ DASHBOARD TAB ═══════════ -->
+      <section id="panel-dashboard" data-testid="panel-dashboard" role="tabpanel" aria-labelledby="tab-dashboard" class="tab-panel scroll-panel" hidden>
+        <div class="panel-toolbar">
+          <div class="toolbar-title-group">
+            <h3 class="panel-title">Dashboard</h3>
+            <span class="toolbar-subtitle" id="dashboard-last-updated" data-testid="dashboard-last-updated">Updated: Just now</span>
+          </div>
+          <div class="toolbar-actions">
+            <button type="button" class="btn-small btn-refresh" id="btn-refresh-dashboard" data-testid="dashboard-refresh-button" data-refresh="dashboard" aria-label="Refresh dashboard metrics and reports">
+              <span class="btn-spinner" id="dashboard-refresh-spinner" hidden aria-hidden="true"></span>
+              <span class="refresh-icon" aria-hidden="true">🔄</span>
+              <span class="refresh-label">Refresh</span>
+            </button>
+          </div>
+        </div>
+        <div id="dashboard-body" data-testid="dashboard-body" aria-live="polite"></div>
+      </section>
+
+      <!-- ═══════════ DOCS & REPORTS TAB ═══════════ -->
+      <section id="panel-docs" data-testid="panel-docs" role="tabpanel" aria-labelledby="tab-docs" class="tab-panel scroll-panel" hidden>
+        <div class="panel-toolbar">
+          <div class="toolbar-title-group">
+            <h3 class="panel-title">Reports &amp; Documentation</h3>
+            <span class="toolbar-subtitle" id="docs-current-file" data-testid="docs-current-file">Jira RCA Defect Healing Report</span>
+          </div>
+          <div class="toolbar-actions">
+            <label for="docs-file-select" class="inline-label">Document</label>
+            <select id="docs-file-select" data-testid="docs-file-select" class="toolbar-input" aria-label="Select report document">
+              <option value="defect-healing/DefectHealingReport-2026-10-13.md">Defect Healing Report (2026-10-13)</option>
+              <option value="xray/xray_mapping.json">Xray Mapping (JSON)</option>
+              <option value="xray/TC_xray.csv">Xray Test Cases (CSV)</option>
+              <option value="TC_SauceDemo.csv">SauceDemo Test Cases (CSV)</option>
+            </select>
+            <button type="button" class="btn-small btn-refresh" id="btn-refresh-docs" data-testid="docs-reload-button" aria-label="Reload documentation report">
+              <span class="btn-spinner" id="docs-refresh-spinner" hidden aria-hidden="true"></span>
+              <span class="refresh-icon" aria-hidden="true">🔄</span>
+              <span class="refresh-label">Reload</span>
+            </button>
+            <button type="button" class="btn-small btn-slate-secondary" id="btn-download-docs" data-testid="docs-export-button" aria-label="Export or download report">
+              📥 Export
+            </button>
+          </div>
+        </div>
+        <div id="docs-body" data-testid="docs-body" class="docs-container" aria-live="polite"></div>
+      </section>
+
+      <!-- ═══════════ RUNS & LOGS TAB ═══════════ -->
+      <section id="panel-runs" data-testid="panel-runs" role="tabpanel" aria-labelledby="tab-runs" class="tab-panel scroll-panel" hidden>
+        <div class="panel-toolbar">
+          <h3 class="panel-title">Run History</h3>
+          <div class="toolbar-actions">
+            <label for="runs-status-filter" class="inline-label">Status</label>
+            <select id="runs-status-filter" data-testid="runs-status-filter" class="toolbar-input">
+              <option value="">All</option>
+              <option value="queued">Queued</option>
+              <option value="running">Running</option>
+              <option value="completed">Completed</option>
+              <option value="failed">Failed</option>
+              <option value="cancelled">Cancelled</option>
+            </select>
+            <button type="button" class="btn-small" data-refresh="runs" data-testid="runs-refresh-button">Refresh</button>
+          </div>
+        </div>
+        <div id="runs-body" data-testid="runs-body" aria-live="polite"></div>
+        <!-- Log viewer / output inspection -->
+        <div class="log-viewer" id="log-viewer" data-testid="log-viewer" hidden>
+          <div class="panel-toolbar">
+            <h4 class="panel-title" id="log-viewer-title" data-testid="log-viewer-title">Run log</h4>
+            <div class="toolbar-actions">
+              <label for="log-filter" class="sr-only">Filter log lines</label>
+              <input type="search" id="log-filter" data-testid="log-filter-input" class="toolbar-input" placeholder="Filter log lines…" maxlength="80" />
+              <button type="button" id="btn-log-download" data-testid="log-download-button" class="btn-small">Download</button>
+              <button type="button" id="btn-log-close" data-testid="log-close-button" class="btn-small">Close</button>
+            </div>
+          </div>
+          <pre id="log-output" data-testid="log-output" class="log-output" tabindex="0" aria-labelledby="log-viewer-title"></pre>
+        </div>
+      </section>
+
+    </main>
+
+  </div>
+
+  <!-- Status bar -->
+  <footer class="status-bar" id="status-bar" data-testid="status-bar" aria-label="Status bar">
+    <span class="sb-item" id="sb-agent-status" data-testid="statusbar-agent">Agent: selenium-orchestrator</span>
+    <span class="sb-spacer"></span>
+    <span class="sb-item" id="sb-gw-status" data-testid="statusbar-gateway">Gateway: Disconnected</span>
+  </footer>
+
+  <!-- Toast notification region -->
+  <div id="toast-region" data-testid="toast-region" class="toast-region" role="status" aria-live="polite"></div>
+
+  <!-- Application modules -->
+  <script src="js/ui.js"></script>
+  <script src="js/commands.js"></script>
+  <script src="js/ide.js"></script>
+  <script src="js/jobs.js"></script>
+  <script src="js/monitor.js"></script>
+  <script src="js/admin.js"></script>
+  <script src="js/layout.js"></script>
+  <script src="js/chat.js"></script>
+  <script src="js/dialogs.js"></script>
+  <script src="js/bob-actions.js"></script>
+  <script src="js/docs.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
